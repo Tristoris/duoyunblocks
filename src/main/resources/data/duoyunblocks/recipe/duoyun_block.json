@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "W": "minecraft:gold_ingot",
+    "R": "minecraft:diamond"
+  },
+  "pattern": [
+    "WWW",
+    "WRW",
+    "WWW"
+  ],
+  "result": {
+    "id": "duoyunblocks:duoyun_block",
+    "count": 1
+  }
+}
+
