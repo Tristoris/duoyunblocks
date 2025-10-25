@@ -10,6 +10,7 @@ import io.github.tristoris.duoyunblocks.items.DuoyunBlockItem;
 import io.github.tristoris.duoyunblocks.util.BasicUtils;
 import io.github.tristoris.duoyunblocks.util.TickTasks;
 import io.github.tristoris.duoyunblocks.util.TimeUtils;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.BlockWithEntity;
 import net.minecraft.block.Blocks;
@@ -74,9 +75,6 @@ public class DuoyunBlock extends BlockWithEntity {
 
             // store per-block-instance luck in the BE
             duoyunBe.setLuck(finalLuck);
-
-            // (no mutation of the block singleton!)
-            BasicUtils.broadcastMessage(world, "placed block, luck is: " + finalLuck);
         }
     }
 
@@ -90,13 +88,11 @@ public class DuoyunBlock extends BlockWithEntity {
 
             for (RegistryEntry<Enchantment> entry : entries) {
                 if (entry.getKey().equals(Optional.of(Enchantments.SILK_TOUCH))) {
-                    BasicUtils.broadcastMessage(world, "silktouch spotted?");
+                    dropDuoyunBlock(world, pos);
                     return state;
                 }
                 BasicUtils.broadcastMessage(world, entry.toString());
             }
-
-            BasicUtils.broadcastMessage(world, "no silktouch");
 
             // --- use the placed block's own luck from its BlockEntity ---
             double beLuck = this.luck; // fallback to the block's default if BE missing
@@ -110,11 +106,6 @@ public class DuoyunBlock extends BlockWithEntity {
 
             // final luck used for event roll
             double finalLuck = (beLuck + bonusLuck) / 2.5;
-
-            // log what we're actually using
-            BasicUtils.broadcastMessage(world,
-                    String.format("luck used -> block: %.1f, player bonus: %.1f, final: %.1f",
-                            beLuck, bonusLuck, finalLuck));
 
             Vec3d center = Vec3d.ofCenter(pos);
             Random rand = new Random();
@@ -139,11 +130,28 @@ public class DuoyunBlock extends BlockWithEntity {
 
             action.run();
 
-            // print the per-block luck that actually influenced this break
             BasicUtils.broadcastMessage(world, "broke block, block luck was : " + beLuck);
         }
 
         return state;
+    }
+
+    private void dropDuoyunBlock(World world, BlockPos pos) {
+        if (world.isClient()) return;
+
+        BlockEntity be = world.getBlockEntity(pos);
+        double beLuck = this.luck; // fallback if BE missing
+
+        if (be instanceof DuoyunBlockEntity duoyunBe) {
+            beLuck = duoyunBe.getLuck();
+        }
+
+        // create the dropped item corresponding to this block
+        ItemStack drop = new ItemStack(this.asItem());
+        // preserve the exact luck value (no change, no rounding)
+        DuoyunBlockItem.setLuck(drop, (int) Math.round(beLuck));
+
+        Block.dropStack(world, pos, drop);
     }
 
 
@@ -201,14 +209,17 @@ public class DuoyunBlock extends BlockWithEntity {
     }
 
     private void sprayNuggets(World world, Vec3d pos, Random rand) {
-        int ironNuggets   = rand.nextInt(51 - 29 + 1) + 29;
-        int goldNuggets   = rand.nextInt(33 - 21  + 1) + 21;
-        int copperNuggets = rand.nextInt(39 - 25 + 1) + 25;
+        int[] ironAmount = new int[]{17, 35};
+        int[] goldAmount = new int[]{13, 27};
+        int[] copperAmount = new int[]{19, 41};
+        int ironNuggets   = rand.nextInt(ironAmount[1] - ironAmount[0] + 1) + ironAmount[0];
+        int goldNuggets   = rand.nextInt(goldAmount[1] - goldAmount[0]  + 1) + goldAmount[0];
+        int copperNuggets = rand.nextInt(copperAmount[1] - copperAmount[0] + 1) + copperAmount[0];
 
         List<ItemStack> drops = new ArrayList<>(List.of(
-                new ItemStack(Items.IRON_NUGGET, ironNuggets),
-                new ItemStack(Items.GOLD_NUGGET, goldNuggets),
-                new ItemStack(Items.COPPER_NUGGET, copperNuggets)
+                new ItemStack(Items.IRON_INGOT, ironNuggets),
+                new ItemStack(Items.GOLD_INGOT, goldNuggets),
+                new ItemStack(Items.COPPER_INGOT, copperNuggets)
         ));
 
         Collections.shuffle(drops, rand);
@@ -235,8 +246,8 @@ public class DuoyunBlock extends BlockWithEntity {
         final double jitter = 0.01;   // tiny spawn jitter
 
         // Burst settings
-        final int burstMin     = 11;
-        final int burstMax     = 14;
+        final int burstMin     = 8;
+        final int burstMax     = 12;
         final int burstPeriod  = 8;   // ticks -> 0.4s
         final double vyBoost   = 2.0; // 2x vertical lift
         final double vxFactor  = 0.5; // halve horizontal speed to keep same range
@@ -316,7 +327,7 @@ public class DuoyunBlock extends BlockWithEntity {
 
         // simple: fire lightning & set fire after ~40 ticks (~2s)
         // (tweak this if you raise/lower spawnY)
-        TickTasks.in((ServerWorld) world, 90, () -> {
+        TickTasks.in((ServerWorld) world, 95, () -> {
             int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
                     targetPos.getX(), targetPos.getZ());
             double x = targetPos.getX() + 0.5;
