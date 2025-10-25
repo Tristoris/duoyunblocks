@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:block/cube_all",
   "textures": {
-    "all": "duoyunblocks:block/duoyun_block"
+    "all": "duoyunblocks:block/duoyun_block_normal"
   }
 }

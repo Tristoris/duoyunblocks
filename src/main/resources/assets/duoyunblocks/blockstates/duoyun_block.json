@@ -1,5 +1,6 @@
 {
   "variants": {
-    "": { "model": "duoyunblocks:block/duoyun_block" }
+    "lit=true":  { "model": "duoyunblocks:block/duoyun_block_glowing" },
+    "lit=false": { "model": "duoyunblocks:block/duoyun_block_normal" }
   }
 }

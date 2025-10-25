@@ -1,6 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "duoyunblocks:block/duoyun_block"
+    "model": "duoyunblocks:block/duoyun_block_normal"
   }
 }

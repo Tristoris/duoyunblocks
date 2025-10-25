@@ -27,6 +27,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.state.StateManager;
+import net.minecraft.state.property.BooleanProperty;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.Heightmap;
@@ -37,27 +39,55 @@ import java.util.*;
 
 public class DuoyunBlock extends BlockWithEntity {
 
+    public static final BooleanProperty LIT = BooleanProperty.of("lit");
+    private static final int LUMINANCE_ON  = 7; // full torch-like
+    private static final int LUMINANCE_OFF = 0;
+    private static final int GLOW_START = 13000;  // start glowing at 13000 (dusk)
+    private static final int GLOW_END   = 23000;  // stop at 23000 (just before dawn)
+    private static final int CHECK_PERIOD_TICKS = 200; // re-evaluate every 10s
+
     public static final MapCodec<DuoyunBlock> CODEC = RecordCodecBuilder.mapCodec(instance ->
             instance.group(
                     createSettingsCodec(), // handles the Block.Settings
                     Codec.DOUBLE.fieldOf("luck").forGetter(block -> block.luck)
             ).apply(instance, DuoyunBlock::new)
-    );    private static final UUID LUCK_UUID = UUID.fromString("4c3f0d9f-9c23-4c0b-9f1f-111111111111");
-    private double luck;
+    );
+    private static final UUID LUCK_UUID = UUID.fromString("4c3f0d9f-9c23-4c0b-9f1f-111111111111");
+    private final double luck;
 
     public DuoyunBlock(Settings settings, double luck) {
-        super(settings);
+        // override luminance to depend on our LIT property (wins over any fixed luminance in BlockDefiner)
+        super(settings.luminance(state -> state.contains(LIT) && state.get(LIT) ? LUMINANCE_ON : LUMINANCE_OFF));
         this.luck = luck;
+        // default off
+        this.setDefaultState(this.getStateManager().getDefaultState().with(LIT, false));
     }
 
+    // === NEW: add LIT to blockstate ===
+    @Override
+    protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
+        builder.add(LIT);
+    }
+
+    // === NEW: schedule periodic checks on place ===
     @Override
     public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.onPlaced(world, pos, state, placer, stack);
+        if (!world.isClient()) {
+            // initial time-based LIT evaluation
+            boolean shouldGlow = shouldGlow(world);
+            if (state.get(LIT) != shouldGlow) {
+                world.setBlockState(pos, state.with(LIT, shouldGlow), Block.NOTIFY_ALL);
+            }
+            // schedule next checks
+            world.scheduleBlockTick(pos, this, CHECK_PERIOD_TICKS);
+        }
+
+        // === your existing luck transfer logic ===
         if (world.isClient()) return;
 
         BlockEntity be = world.getBlockEntity(pos);
         if (be instanceof DuoyunBlockEntity duoyunBe) {
-            // 1) read component from the item stack if present
             Integer luckFromItem = stack.get(ModDataComponents.LUCK);
 
             double baseLuck;
@@ -66,22 +96,37 @@ public class DuoyunBlock extends BlockWithEntity {
             } else if (stack.getItem() instanceof DuoyunBlockItem lbi) {
                 baseLuck = lbi.getDefaultLuck();
             } else {
-                // final fallback: the block's constructor default (do NOT mutate this.luck!)
                 baseLuck = this.luck;
             }
 
-            // clamp to [-100, 100]
             double finalLuck = Math.max(-100, Math.min(100, baseLuck));
-
-            // store per-block-instance luck in the BE
             duoyunBe.setLuck(finalLuck);
         }
+    }
+
+    // === NEW: re-evaluate LIT on a timer ===
+    @Override
+    public void scheduledTick(BlockState state, ServerWorld world, BlockPos pos, net.minecraft.util.math.random.Random random) {
+        boolean shouldGlow = shouldGlow(world);
+        if (state.get(LIT) != shouldGlow) {
+            world.setBlockState(pos, state.with(LIT, shouldGlow), Block.NOTIFY_ALL);
+        }
+        world.scheduleBlockTick(pos, this, CHECK_PERIOD_TICKS);
+    }
+
+    // === NEW: time window logic (supports wrap-around if GLOW_END < GLOW_START) ===
+    private boolean shouldGlow(World world) {
+        return world.isNight();
     }
 
     @Override
     public BlockState onBreak(World world, BlockPos pos, BlockState state, PlayerEntity player) {
         super.onBreak(world, pos, state, player);
         if (!world.isClient()) {
+            if (isInvalidBreakingOccasion(player)) {
+                return state;
+            }
+
             ItemStack tool = player.getMainHandStack();
             ItemEnchantmentsComponent enchantments = tool.getEnchantments();
             Set<RegistryEntry<Enchantment>> entries = enchantments.getEnchantments();
@@ -146,14 +191,16 @@ public class DuoyunBlock extends BlockWithEntity {
             beLuck = duoyunBe.getLuck();
         }
 
-        // create the dropped item corresponding to this block
         ItemStack drop = new ItemStack(this.asItem());
-        // preserve the exact luck value (no change, no rounding)
         DuoyunBlockItem.setLuck(drop, (int) Math.round(beLuck));
 
         Block.dropStack(world, pos, drop);
     }
 
+    private static boolean isInvalidBreakingOccasion(@Nullable PlayerEntity player) {
+        // only allow survival/adventure players
+        return player == null || player.isInCreativeMode() || player.isSpectator();
+    }
 
     private void rollCalamity(World world) {
         BasicUtils.broadcastMessage(world, "calamity rolled");
@@ -164,12 +211,10 @@ public class DuoyunBlock extends BlockWithEntity {
         final double R = 4.0;                  // radius in blocks
         final double y = pos.getY() + 2.0;     // 2 blocks above so they fall
 
-        // spawn around the center of the broken block
         final double cx = pos.getX() + 0.5;
         final double cz = pos.getZ() + 0.5;
 
         for (int i = 0; i < count; i++) {
-            // area-uniform point in a disk: r = R*sqrt(u), theta in [0, 2π)
             double u = rand.nextDouble();
             double r = R * Math.sqrt(u);
             double theta = rand.nextDouble() * Math.PI * 2.0;
@@ -177,7 +222,6 @@ public class DuoyunBlock extends BlockWithEntity {
             double x = cx + r * Math.cos(theta);
             double z = cz + r * Math.sin(theta);
 
-            // small vertical jitter to reduce entity overlap
             double jy = (rand.nextDouble() - 0.5) * 0.2;
 
             ZombifiedPiglinEntity piglin = EntityType.ZOMBIFIED_PIGLIN.create(world, SpawnReason.EVENT);
@@ -186,8 +230,8 @@ public class DuoyunBlock extends BlockWithEntity {
                         x,
                         y + jy,
                         z,
-                        rand.nextFloat() * 360F, // yaw: random facing direction
-                        0.0F                     // pitch: level
+                        rand.nextFloat() * 360F,
+                        0.0F
                 );
                 world.spawnEntity(piglin);
             }
@@ -195,34 +239,45 @@ public class DuoyunBlock extends BlockWithEntity {
     }
 
     private void applyBadLuck(PlayerEntity player) {
-            player.addStatusEffect(new StatusEffectInstance(
-                    StatusEffects.UNLUCK,
-                    TimeUtils.minutesToTicks(10),  // duration in ticks
-                    1         // amplifier: 0 = level I, 1 = level II, etc.
-            ));
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.UNLUCK,
+                TimeUtils.minutesToTicks(10),
+                1
+        ));
 
-            player.addStatusEffect(new StatusEffectInstance(
-                    StatusEffects.NAUSEA,
-                    TimeUtils.minutesToTicks(1),
-                    0
-            ));
+        player.addStatusEffect(new StatusEffectInstance(
+                StatusEffects.NAUSEA,
+                TimeUtils.minutesToTicks(1),
+                0
+        ));
     }
 
     private void sprayNuggets(World world, Vec3d pos, Random rand) {
         int[] ironAmount = new int[]{17, 35};
         int[] goldAmount = new int[]{13, 27};
         int[] copperAmount = new int[]{19, 41};
-        int ironNuggets   = rand.nextInt(ironAmount[1] - ironAmount[0] + 1) + ironAmount[0];
-        int goldNuggets   = rand.nextInt(goldAmount[1] - goldAmount[0]  + 1) + goldAmount[0];
-        int copperNuggets = rand.nextInt(copperAmount[1] - copperAmount[0] + 1) + copperAmount[0];
+        int ironNuggets   = (int) 2.3 * rand.nextInt(ironAmount[1] - ironAmount[0] + 1) + ironAmount[0];
+        int goldNuggets   = (int) 2.6 * rand.nextInt(goldAmount[1] - goldAmount[0]  + 1) + goldAmount[0];
+        int copperNuggets = (int) 2.8 * rand.nextInt(copperAmount[1] - copperAmount[0] + 1) + copperAmount[0];
+        int ironIngots   = rand.nextInt(ironAmount[1] - ironAmount[0] + 1) + ironAmount[0];
+        int goldIngots   = rand.nextInt(goldAmount[1] - goldAmount[0]  + 1) + goldAmount[0];
+        int copperIngots = rand.nextInt(copperAmount[1] - copperAmount[0] + 1) + copperAmount[0];
 
         List<ItemStack> drops = new ArrayList<>(List.of(
-                new ItemStack(Items.IRON_INGOT, ironNuggets),
-                new ItemStack(Items.GOLD_INGOT, goldNuggets),
-                new ItemStack(Items.COPPER_INGOT, copperNuggets)
+                new ItemStack(Items.IRON_NUGGET, ironNuggets),
+                new ItemStack(Items.GOLD_NUGGET, goldNuggets),
+                new ItemStack(Items.COPPER_NUGGET, copperNuggets)
+        ));
+
+        List<ItemStack> ingots = new ArrayList<>(List.of(
+                new ItemStack(Items.IRON_INGOT, ironIngots),
+                new ItemStack(Items.GOLD_INGOT, goldIngots),
+                new ItemStack(Items.COPPER_INGOT, copperIngots)
         ));
 
         Collections.shuffle(drops, rand);
+        Collections.shuffle(ingots, rand);
+        drops.addAll(ingots);
         sprayItems(world, pos, drops, rand);
     }
 
@@ -233,7 +288,6 @@ public class DuoyunBlock extends BlockWithEntity {
     private void sprayItems(World world, Vec3d origin, List<ItemStack> stacks, Random rand) {
         if (!(world instanceof ServerWorld server)) return;
 
-        // ===== knobs =====
         final double baseMinSpeed  = 0.225;
         final double baseMaxSpeed  = 0.375;
         final double upMin         = 0.14;
@@ -243,16 +297,14 @@ public class DuoyunBlock extends BlockWithEntity {
         final double minSpeed      = baseMinSpeed * spreadScale;
         final double maxSpeed      = baseMaxSpeed * spreadScale;
 
-        final double jitter = 0.01;   // tiny spawn jitter
+        final double jitter = 0.01;
 
-        // Burst settings
-        final int burstMin     = 8;
-        final int burstMax     = 12;
-        final int burstPeriod  = 8;   // ticks -> 0.4s
-        final double vyBoost   = 2.0; // 2x vertical lift
-        final double vxFactor  = 0.5; // halve horizontal speed to keep same range
+        final int burstMin     = 11;
+        final int burstMax     = 14;
+        final int burstPeriod  = 8;
+        final double vyBoost   = 2.0;
+        final double vxFactor  = 0.5;
 
-        // Flatten stacks into single-item stacks
         List<ItemStack> singles = new ArrayList<>();
         for (ItemStack stack : stacks) {
             int c = stack.getCount();
@@ -268,21 +320,17 @@ public class DuoyunBlock extends BlockWithEntity {
             int sizeThisBurst = Math.min(remaining, burstMin + rand.nextInt(burstMax - burstMin + 1));
             int delay = burstIndex * burstPeriod;
 
-            // slice the items for this burst
             List<ItemStack> burst = new ArrayList<>(singles.subList(cursor, cursor + sizeThisBurst));
             cursor += sizeThisBurst;
             burstIndex++;
 
             TickTasks.in(server, delay, () -> {
-                // Spawn all items in this burst at the same tick in different directions
                 for (ItemStack single : burst) {
                     double phi   = server.random.nextDouble() * Math.PI * 2.0;
 
-                    // horizontal speed scaled down to keep distance similar (airtime ~2x)
                     double base = minSpeed + server.random.nextDouble() * (maxSpeed - minSpeed);
                     double hspd = base * vxFactor;
 
-                    // vertical speed doubled
                     double vy = (upMin + server.random.nextDouble() * (upMax - upMin)) * vyBoost;
 
                     double sx = origin.x + (server.random.nextDouble() * 2 - 1) * jitter;
@@ -302,31 +350,21 @@ public class DuoyunBlock extends BlockWithEntity {
         }
     }
 
-
-
     private void spawnFallingIronBlock(World world, BlockPos targetPos) {
-        int groundY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
-                targetPos.getX(), targetPos.getZ());
-
-        // spawn at the very top of the world
         int spawnY = world.getHeight() - 1;
 
         BlockState iron = Blocks.IRON_BLOCK.getDefaultState();
 
-        // spawn the falling block via the factory
         FallingBlockEntity falling = FallingBlockEntity.spawnFromBlock(
                 world,
                 new BlockPos(targetPos.getX(), spawnY, targetPos.getZ()),
                 iron
         );
 
-        double speed = 5; // try 1.2–1.8; higher = faster
+        double speed = 5;
         falling.setVelocity(0.0, -speed, 0.0);
-        // optional damage like an anvil
         falling.setHurtEntities(2.0F, 40);
 
-        // simple: fire lightning & set fire after ~40 ticks (~2s)
-        // (tweak this if you raise/lower spawnY)
         TickTasks.in((ServerWorld) world, 95, () -> {
             int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
                     targetPos.getX(), targetPos.getZ());
@@ -363,7 +401,6 @@ public class DuoyunBlock extends BlockWithEntity {
     private void rollOneHundredEvent(World world) {
         BasicUtils.broadcastMessage(world, "big prize rolled");
     }
-
 
     @Override
     protected MapCodec<? extends BlockWithEntity> getCodec() {
