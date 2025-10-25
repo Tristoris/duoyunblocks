@@ -8,6 +8,13 @@ import io.github.tristoris.duoyunblocks.items.ItemDefiner;
 import io.github.tristoris.duoyunblocks.recipe.DuoyunBlockRecipes;
 import net.fabricmc.api.ModInitializer;
 
+import net.fabricmc.fabric.api.biome.v1.BiomeModifications;
+import net.fabricmc.fabric.api.biome.v1.BiomeSelectors;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.util.Identifier;
+import net.minecraft.world.gen.GenerationStep;
+import net.minecraft.world.gen.feature.PlacedFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +35,16 @@ public class DuoyunBlocks implements ModInitializer {
 		EntityDefiner.init();    // block entity type
 		DuoyunBlockRecipes.init(); // recipe serializers
 		CreativeTabDefiner.init();
+
+		RegistryKey<PlacedFeature> DUOYUN_SINGLE_BLOCK_PLACED =
+				RegistryKey.of(RegistryKeys.PLACED_FEATURE, Identifier.of(MOD_ID, "generated_duoyun_block_single"));
+
+		// Overworld only, during vegetation decoration (surface-like things are commonly added here)
+		BiomeModifications.addFeature(
+				BiomeSelectors.foundInOverworld(),
+				GenerationStep.Feature.VEGETAL_DECORATION,
+				DUOYUN_SINGLE_BLOCK_PLACED
+		);
 
 		LOGGER.info("Duoyun Blocks mod loaded!");
 	}

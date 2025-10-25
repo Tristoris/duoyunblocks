@@ -16,7 +16,8 @@ public final class BlockDefiner {
             register("duoyun_block",
                     s -> new DuoyunBlock(
                             s.strength(0.6f, 6.0f)  // faster to mine
-                                    .requiresTool(),       // wrong tool = slow/no drops, right tool = fast
+                                    .requiresTool()
+                                    .luminance(state -> 5),       // wrong tool = slow/no drops, right tool = fast
                             0.0),
                     Block.Settings.create());
 
