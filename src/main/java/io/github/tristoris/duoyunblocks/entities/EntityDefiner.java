@@ -6,6 +6,9 @@ import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityT
 import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.SpawnGroup;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
@@ -34,6 +37,16 @@ public final class EntityDefiner {
         );
     }
 
+    private static <T extends Entity> EntityType<T> registerEntity(String path, EntityType.Builder<T> builder) {
+        Identifier id = Identifier.of(DuoyunBlocks.MOD_ID, path);
+        RegistryKey<EntityType<?>> key = RegistryKey.of(RegistryKeys.ENTITY_TYPE, id);
+
+        // ✅ 1.21+: build() takes the RegistryKey<EntityType<?>>
+        EntityType<T> type = builder.build(key);
+
+        // register in global registry
+        return Registry.register(Registries.ENTITY_TYPE, key, type);
+    }
 
     public static void init() {
 

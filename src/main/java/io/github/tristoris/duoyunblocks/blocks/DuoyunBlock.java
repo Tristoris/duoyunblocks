@@ -3,6 +3,7 @@ package io.github.tristoris.duoyunblocks.blocks;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import io.github.tristoris.duoyunblocks.events.BlazeArenaEvent;
 import io.github.tristoris.duoyunblocks.components.ModDataComponents;
 import io.github.tristoris.duoyunblocks.entities.EntityDefiner;
 import io.github.tristoris.duoyunblocks.entities.DuoyunBlockEntity;
@@ -157,11 +158,12 @@ public class DuoyunBlock extends BlockWithEntity {
 
             // generates a number between -100 and 100 shifted by finalLuck
             double hit = Math.min(Math.max((Math.random() - 0.5) * 140 + finalLuck, -100), 100);
-            BasicUtils.broadcastMessage(world, "calculating chances, hit is : " + hit);
+            //BasicUtils.broadcastMessage(world, "calculating chances, hit is : " + hit);
 
             // duoyun block events:
             TreeMap<Integer, Runnable> events = new TreeMap<>();
             events.put(-100, () -> rollCalamity(world));
+            events.put(-60, () -> BlazeArenaEvent.spawnArena((ServerWorld) world, player));
             events.put(-20, () -> spawnZombiePiglins(world, pos, rand));
             //events.put(0,   () -> applyBadLuck(player));
             events.put(10,  () -> sprayNuggets(world, center, rand));
@@ -175,7 +177,7 @@ public class DuoyunBlock extends BlockWithEntity {
 
             action.run();
 
-            BasicUtils.broadcastMessage(world, "broke block, block luck was : " + beLuck);
+            //BasicUtils.broadcastMessage(world, "broke block, block luck was : " + beLuck);
         }
 
         return state;
@@ -204,6 +206,7 @@ public class DuoyunBlock extends BlockWithEntity {
 
     private void rollCalamity(World world) {
         BasicUtils.broadcastMessage(world, "calamity rolled");
+        if (!(world instanceof ServerWorld server)) return;
     }
 
     private void spawnZombiePiglins(World world, BlockPos pos, Random rand) {

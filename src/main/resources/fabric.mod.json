@@ -17,6 +17,9 @@
 	"entrypoints": {
 		"main": [
 			"io.github.tristoris.duoyunblocks.DuoyunBlocks"
+		],
+		"client": [
+			"io.github.tristoris.duoyunblocks.DuoyunBlocksClient"
 		]
 	},
 	"depends": {
